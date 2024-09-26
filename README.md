@@ -50,4 +50,4 @@ Optionally you can install pre-commit hooks that automatically will format and c
 pre-commit install
 ```
 
-You can also install the ruff extension or LSP for your code editor to automatically format and check linting.
+You can also install [Ruff](https://docs.astral.sh/ruff/editors/setup/) for your code editor to automatically format and check linting.
