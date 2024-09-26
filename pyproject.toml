@@ -1,2 +1,18 @@
 [project]
 requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+exclude = [
+  ".git",
+  ".ipynb_checkpoints",
+  ".pyenv",
+  ".ruff_cache",
+  ".venv",
+  ".vscode",
+  '.python-version',
+  "docs",
+]
+
+[tool.ruff.format]
+quote-style = "single"
