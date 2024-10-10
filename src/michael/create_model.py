@@ -3,6 +3,8 @@ import torch
 from torch import nn
 from sklearn.preprocessing import StandardScaler
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 print('Starting script...')
 
 print('Loading data...')
@@ -20,11 +22,11 @@ scaler = StandardScaler()
 X = scaler.fit_transform(X)
 
 print('Converting to PyTorch tensors...')
-X = torch.tensor(X, dtype=torch.float32)
-Y = torch.tensor(Y.values, dtype=torch.float32)
+X = torch.tensor(X, dtype=torch.float32).to(device)
+Y = torch.tensor(Y.values, dtype=torch.float32).to(device)
 
 print('Defining the model...')
-model = nn.Linear(X.shape[1], 2)  # simple linear regression model
+model = nn.Linear(X.shape[1], 2).to(device)  # simple linear regression model
 
 print('Defining the loss function and optimizer...')
 loss_fn = nn.MSELoss()
@@ -44,12 +46,12 @@ print('Making predictions on new data...')
 new_data = pd.read_csv('original_data/ais/ais_test.csv', delimiter='|')
 new_data = new_data.fillna(new_data.mean())
 new_X = scaler.transform(new_data.drop(['longitude', 'latitude'], axis=1))
-new_X = torch.tensor(new_X, dtype=torch.float32)
+new_X = torch.tensor(new_X, dtype=torch.float32).to(device)
 new_predictions = model(new_X)
 
 print('Saving predictions...')
 submission = pd.DataFrame(
-    new_predictions.detach().numpy(), columns=['longitude_predicted', 'latitude_predicted']
+    new_predictions.cpu().detach().numpy(), columns=['longitude_predicted', 'latitude_predicted']
 )
 submission.insert(0, 'ID', range(len(submission)))
 submission.to_csv('submission.csv', index=False)
