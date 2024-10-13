@@ -39,6 +39,7 @@ try:
     )
 
     logging.info('Grouping navstat values...')
+
     def group_navstat(navstat):
         if navstat in [0, 8]:
             return 'under_way'
@@ -107,6 +108,42 @@ try:
     schedules_df.sort_values(by=['vesselId', 'arrivalDate'], inplace=True)
     schedules_df.reset_index(drop=True, inplace=True)
 
+    logging.info(
+        'Preprocessing schedules to handle infeasible arrival dates and small movements at the same port...'
+    )
+    schedules_df['small_movement_flag'] = 0
+    schedules_df['skipped_port_flag'] = 0
+
+    rows_to_drop = set()
+
+    for vessel_id in schedules_df['vesselId'].unique():
+        vessel_indices = schedules_df[schedules_df['vesselId'] == vessel_id].index.tolist()
+        i = 0
+        while i < len(vessel_indices) - 1:
+            current_idx = vessel_indices[i]
+            next_idx = vessel_indices[i + 1]
+            current_row = schedules_df.loc[current_idx]
+            next_row = schedules_df.loc[next_idx]
+
+            if current_row['portId'] == next_row['portId']:
+                schedules_df.at[current_idx, 'sailingDate'] = next_row['sailingDate']
+                schedules_df.at[current_idx, 'small_movement_flag'] = 1
+                rows_to_drop.add(next_idx)
+                vessel_indices.pop(i + 1)
+                continue
+
+            elif next_row['arrivalDate'] <= current_row['sailingDate']:
+                rows_to_drop.add(next_idx)
+                schedules_df.at[current_idx, 'skipped_port_flag'] = 1
+                vessel_indices.pop(i + 1)
+                continue
+
+            else:
+                i += 1
+
+    logging.info('Removing %s rows marked for dropping...', len(rows_to_drop))
+    schedules_df = schedules_df.drop(index=list(rows_to_drop)).reset_index(drop=True)
+
     logging.info('Writing cleaned schedules data to schedules_to_may_2024_m.csv...')
     schedules_df.to_csv(
         os.path.join(current_dir, '../../cleaned_data/ais/schedules_to_may_2024_m.csv'), index=False
@@ -158,15 +195,28 @@ try:
 
     logging.info('Calculating age and dropping yearBuilt column...')
     current_year = 2024
-    vessels_df['age'] = vessels_df['yearBuilt'].apply(lambda x: current_year - x if pd.notna(x) else np.nan)
+    vessels_df['age'] = vessels_df['yearBuilt'].apply(
+        lambda x: current_year - x if pd.notna(x) else np.nan
+    )
     vessels_df = vessels_df.drop(columns=['yearBuilt'])
 
     logging.info('Dropping unnecessary columns...')
-    columns_to_drop = ['NT', 'depth', 'draft', 'freshWater', 'fuel', 'maxHeight', 'maxWidth', 'rampCapacity']
+    columns_to_drop = [
+        'NT',
+        'depth',
+        'draft',
+        'freshWater',
+        'fuel',
+        'maxHeight',
+        'maxWidth',
+        'rampCapacity',
+    ]
     vessels_df = vessels_df.drop(columns=columns_to_drop)
 
     logging.info('Writing cleaned vessel data to vessels_m.csv...')
-    vessels_df.to_csv(os.path.join(current_dir, '../../cleaned_data/vessels/vessels_m.csv'), index=False)
+    vessels_df.to_csv(
+        os.path.join(current_dir, '../../cleaned_data/vessels/vessels_m.csv'), index=False
+    )
 
     logging.info('Vessel data cleaning completed successfully.')
 except Exception as e:
