@@ -1,2 +1,3 @@
 .ruff_cache/
 pyrightconfig.json
+.ipynb_checkpoints/
