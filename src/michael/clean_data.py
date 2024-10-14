@@ -14,7 +14,6 @@ try:
     ais_df = pd.read_csv(
         os.path.join(current_dir, '../../original_data/ais/ais_train.csv'),
         delimiter='|',
-        encoding='utf-8',
     )
 
     logging.info('Converting time columns to datetime...')
@@ -75,7 +74,6 @@ try:
     schedules_df = pd.read_csv(
         os.path.join(current_dir, '../../original_data/ais/schedules_to_may_2024.csv'),
         delimiter='|',
-        encoding='utf-8',
     )
 
     logging.info('Dropping duplicates...')
@@ -163,7 +161,6 @@ try:
     ports_df = pd.read_csv(
         os.path.join(current_dir, '../../original_data/ports/ports.csv'),
         delimiter='|',
-        encoding='utf-8',
     )
 
     logging.info('Dropping unnecessary columns...')
@@ -190,7 +187,6 @@ try:
     vessels_df = pd.read_csv(
         os.path.join(current_dir, '../../original_data/vessels/vessels.csv'),
         delimiter='|',
-        encoding='utf-8',
     )
 
     logging.info('Calculating age and dropping yearBuilt column...')
