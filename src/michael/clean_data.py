@@ -4,7 +4,7 @@ import logging
 import os
 import time
 
-start_time = time.time()
+script_start_time = time.time()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
@@ -218,5 +218,5 @@ try:
 except Exception as e:
     logging.error('An error occurred during the vessels data cleaning process: %s', e)
 
-elapsed_time = time.time() - start_time
+elapsed_time = time.time() - script_start_time
 logging.info(f'Total time elapsed: {elapsed_time:.2f} seconds')
