@@ -179,23 +179,21 @@ for vessel_id in ais_df['vesselId'].unique():
 logging.info('Concatenating merged data...')
 merged_df = pd.concat(merged_dfs, ignore_index=True)
 
-output_path = os.path.join(current_dir, '../../cleaned_data/merged_m.csv')
-merged_df.to_csv(output_path, index=False, encoding='utf-8')
-
 logging.info('Dropping values to predict that are missing...')
 merged_df = merged_df.dropna(subset=['latitude', 'longitude'])
 
 logging.info('Filling missing values...')
 categorical_columns = merged_df.select_dtypes(include=['object']).columns
 merged_df[categorical_columns] = merged_df[categorical_columns].fillna('Unknown')
-
-logging.info('Dropping duplicates...')
-merged_df = merged_df.drop_duplicates()
-
 numerical_columns = merged_df.select_dtypes(include=['int64', 'float64']).columns
 for col in numerical_columns:
     merged_df[col] = merged_df[col].fillna(merged_df[col].median())
 
+logging.info('Dropping duplicates...')
+merged_df = merged_df.drop_duplicates()
+
+output_path = os.path.join(current_dir, '../../cleaned_data/merged_m.csv')
+merged_df.to_csv(output_path, index=False, encoding='utf-8')
 logging.info('Merged data saved to %s', output_path)
 
 elapsed_time = time.time() - script_start_time
