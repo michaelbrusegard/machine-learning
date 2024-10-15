@@ -55,6 +55,9 @@ try:
 
     ais_df['navstat'] = ais_df['navstat'].apply(group_navstat)
     ais_df = pd.get_dummies(ais_df, columns=['navstat'])
+    for column in ais_df.columns:
+        if 'navstat' in column:
+            ais_df[column] = ais_df[column].fillna(0).astype(int)
 
     logging.info('Sorting values...')
     ais_df = ais_df.sort_values(by=['vesselId', 'time']).reset_index(drop=True)

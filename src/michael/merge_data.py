@@ -183,11 +183,28 @@ logging.info('Dropping values to predict that are missing...')
 merged_df = merged_df.dropna(subset=['latitude', 'longitude'])
 
 logging.info('Filling missing values...')
-categorical_columns = merged_df.select_dtypes(include=['object']).columns
-merged_df[categorical_columns] = merged_df[categorical_columns].fillna('Unknown')
+for col in ['schedule_small_movement_flag', 'schedule_skipped_port_flag']:
+    merged_df[col] = merged_df[col].fillna(0).astype(int)
+
 numerical_columns = merged_df.select_dtypes(include=['int64', 'float64']).columns
+
 for col in numerical_columns:
     merged_df[col] = merged_df[col].fillna(merged_df[col].median())
+
+date_columns_train = [
+    'time',
+    'etaRaw',
+    'schedule_arrivalDate',
+    'schedule_sailingDate',
+    'schedule_voyage_end',
+]
+
+for col in date_columns_train:
+    if col in merged_df.columns:
+        merged_df[col] = pd.to_datetime(merged_df[col], errors='coerce')
+
+categorical_columns = merged_df.select_dtypes(include=['object']).columns
+merged_df[categorical_columns] = merged_df[categorical_columns].fillna('Unknown')
 
 logging.info('Dropping duplicates...')
 merged_df = merged_df.drop_duplicates()
