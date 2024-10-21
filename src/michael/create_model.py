@@ -1,57 +1,172 @@
-import pandas as pd
 import torch
-from torch import nn
+import torch.nn as nn
+import pandas as pd
 from sklearn.preprocessing import StandardScaler
+from torch.utils.data import Dataset, DataLoader
+import time
+import os
+import logging
 
-print('Starting script...')
+script_start_time = time.time()
+current_dir = os.path.dirname(os.path.abspath(__file__))
 
-print('Loading data...')
-data = pd.read_csv('original_data/ais/ais_train.csv', delimiter='|')
+logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 
-print('Preprocessing data...')
-data = data.fillna(data.mean())  # fill missing values with column mean
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-print('Splitting data into features and targets...')
-X = data.drop(['longitude', 'latitude'], axis=1)
-Y = data[['longitude', 'latitude']]
+logging.info('Loading training data...')
+train_data = pd.read_csv(os.path.join(current_dir, '../../cleaned_data/merged_m.csv'))
 
-print('Normalizing features...')
+logging.info('Loading test data...')
+test_data = pd.read_csv(os.path.join(current_dir, '../../original_data/ais/ais_test.csv'))
+
+logging.info('Converting datetime columns to datetime objects...')
+date_columns_train = [
+    'time',
+    'etaRaw',
+    'schedule_arrivalDate',
+    'schedule_sailingDate',
+    'schedule_voyage_end',
+]
+
+for column in date_columns_train:
+    train_data[column] = pd.to_datetime(train_data[column], errors='coerce')
+for column in date_columns_train:
+    train_data[column] = train_data[column].apply(
+        lambda x: x.timestamp() if not pd.isnull(x) else x
+    )
+
+test_data['time'] = pd.to_datetime(test_data['time'])
+test_data['time'] = test_data['time'].apply(lambda x: x.timestamp() if not pd.isnull(x) else x)
+
+logging.info('Dropping latitude and longitude for predictions...')
+features = train_data.drop(['latitude', 'longitude'], axis=1)
+labels = train_data[['latitude', 'longitude']]
+
+logging.info('Scale appropriate columns...')
+exclude_columns = [
+    'time',
+    'etaRaw',
+    'schedule_arrivalDate',
+    'schedule_sailingDate',
+    'schedule_voyage_end',
+    'navstat_emergency',
+    'navstat_reserved',
+    'navstat_special_maneuver',
+    'navstat_stopped',
+    'navstat_undefined',
+    'navstat_under_way',
+    'ais_portId',
+    'vesselId',
+    'schedule_moored_portId',
+    'schedule_destination_portId',
+    'shippingLineId',
+    'homePort',
+    'schedule_small_movement_flag',
+    'schedule_skipped_port_flag',
+]
+
+scale_columns = [col for col in features.columns if col not in exclude_columns]
+features_scale = features[scale_columns]
+
+non_numeric_columns = features_scale.select_dtypes(exclude=['int64', 'float64']).columns
+
+print(non_numeric_columns)
+
 scaler = StandardScaler()
-X = scaler.fit_transform(X)
+features_scale = scaler.fit_transform(features_scale)
 
-print('Converting to PyTorch tensors...')
-X = torch.tensor(X, dtype=torch.float32)
-Y = torch.tensor(Y.values, dtype=torch.float32)
+features[scale_columns] = features_scale
 
-print('Defining the model...')
-model = nn.Linear(X.shape[1], 2)  # simple linear regression model
 
-print('Defining the loss function and optimizer...')
-loss_fn = nn.MSELoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+class AISDataset(Dataset):
+    def __init__(self, features, labels=None):
+        self.features = features
+        self.labels = labels
 
-print('Training the model...')
-for epoch in range(10):
-    optimizer.zero_grad()
-    predictions = model(X)
-    loss = loss_fn(predictions, Y)
-    loss.backward()
-    optimizer.step()
-    if epoch % 1 == 0:
-        print(f'Epoch: {epoch+1}, Loss: {loss.item()}')
+    def __len__(self):
+        return len(self.features)
 
-print('Making predictions on new data...')
-new_data = pd.read_csv('original_data/ais/ais_test.csv', delimiter='|')
-new_data = new_data.fillna(new_data.mean())
-new_X = scaler.transform(new_data.drop(['longitude', 'latitude'], axis=1))
-new_X = torch.tensor(new_X, dtype=torch.float32)
-new_predictions = model(new_X)
+    def __getitem__(self, idx):
+        if self.labels is not None:
+            return self.features.iloc[idx].values.astype(float), self.labels.iloc[
+                idx
+            ].values.astype(float)
+        return self.features.iloc[idx].values.astype(float)
 
-print('Saving predictions...')
-submission = pd.DataFrame(
-    new_predictions.detach().numpy(), columns=['longitude_predicted', 'latitude_predicted']
-)
-submission.insert(0, 'ID', range(len(submission)))
-submission.to_csv('submission.csv', index=False)
 
-print('Script completed.')
+logging.info('Creating datasets...')
+features = features.reset_index(drop=True)
+labels = labels.reset_index(drop=True)
+
+train_dataset = AISDataset(features, labels)
+test_dataset = AISDataset(test_data)
+
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+test_loader = DataLoader(test_dataset, batch_size=32)
+
+
+class Model(nn.Module):
+    def __init__(self):
+        super(Model, self).__init__()
+        self.layer = nn.Sequential(nn.Linear(features.shape[1], 64), nn.ReLU(), nn.Linear(64, 2))
+
+    def forward(self, x):
+        return self.layer(x)
+
+
+logging.info('Creating model...')
+model = Model().to(device)
+
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+logging.info('Training started')
+
+for epoch in range(100):
+    for i, (inputs, targets) in enumerate(train_loader):
+        inputs = inputs.to(device).float()
+        targets = targets.to(device).float()
+
+        outputs = model(inputs)
+        loss = criterion(outputs, targets)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+    logging.info(f'Epoch {epoch+1} completed')
+
+logging.info('Testing started')
+
+model.eval()
+with torch.no_grad():
+    for i, inputs in enumerate(test_loader):
+        inputs = inputs.to(device).float()
+        outputs = model(inputs)
+        if i == 0:
+            predictions = outputs
+        else:
+            predictions = torch.cat((predictions, outputs), 0)
+
+predictions = predictions.cpu().numpy()
+submission = pd.DataFrame(predictions, columns=['longitude_predicted', 'latitude_predicted'])
+submission.insert(0, 'ID', test_data['ID'])
+
+
+def get_unique_filename(base_filename):
+    counter = 0
+    while True:
+        filename = f'{base_filename}_{counter}.csv'
+        if not os.path.isfile(filename):
+            return filename
+        counter += 1
+
+
+base_filename = os.path.join(current_dir, '../../output/submission_m')
+unique_filename = get_unique_filename(base_filename)
+
+logging.info(f'Saving submission file to {unique_filename}')
+submission.to_csv(unique_filename, index=False)
+
+elapsed_time = time.time() - script_start_time
+logging.info(f'Total time elapsed: {elapsed_time:.2f} seconds')
