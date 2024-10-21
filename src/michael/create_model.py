@@ -1,3 +1,4 @@
+import logging
 import torch
 import torch.nn as nn
 import pandas as pd
@@ -5,7 +6,6 @@ from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset, DataLoader
 import time
 import os
-import logging
 
 script_start_time = time.time()
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +20,11 @@ train_data = pd.read_csv(os.path.join(current_dir, '../../cleaned_data/merged_m.
 logging.info('Loading test data...')
 test_data = pd.read_csv(os.path.join(current_dir, '../../original_data/ais/ais_test.csv'))
 
+if 'ID' in test_data.columns:
+    test_ids = test_data['ID']
+else:
+    raise KeyError("'ID' column not found in test_data.")
+
 logging.info('Converting datetime columns to numbers...')
 date_columns_train = [
     'time',
@@ -32,7 +37,6 @@ date_columns_train = [
 for column in date_columns_train:
     train_data[column] = pd.to_datetime(train_data[column], errors='coerce')
     train_data[column] = pd.to_numeric(train_data[column], errors='coerce')
-
 
 test_data['time'] = pd.to_datetime(test_data['time'])
 test_data['time'] = pd.to_numeric(test_data['time'], errors='coerce')
@@ -48,16 +52,27 @@ id_columns = [
 ]
 for column in id_columns:
     train_data[column] = train_data[column].astype('category').cat.codes
+    train_data[column] = train_data[column].astype('int64')
+
 test_data['vesselId'] = test_data['vesselId'].astype('category').cat.codes
+test_data['vesselId'] = test_data['vesselId'].astype('int64')
 
-logging.info('Data types of data:')
-print(train_data.dtypes)
-print(test_data.dtypes)
+logging.info('Filling missing columns in test data with appropriate data types...')
+missing_columns = set(train_data.columns) - set(test_data.columns)
 
-logging.info('Sample of data:')
-print(train_data.sample(5))
+for column in missing_columns:
+    if train_data[column].dtype == 'float64':
+        test_data[column] = 0.0
+    elif train_data[column].dtype == 'int64':
+        test_data[column] = 0
 
-logging.info('Dropping latitude and longitude for predictions...')
+for column in train_data.columns:
+    if column in test_data.columns:
+        test_data[column] = test_data[column].astype(train_data[column].dtype)
+
+test_data = test_data[train_data.columns]
+
+logging.info('Dropping latitude and longitude from features...')
 features = train_data.drop(['latitude', 'longitude'], axis=1)
 labels = train_data[['latitude', 'longitude']]
 
@@ -106,16 +121,23 @@ features = features.reset_index(drop=True)
 labels = labels.reset_index(drop=True)
 
 train_dataset = AISDataset(features, labels)
-test_dataset = AISDataset(test_data)
+test_features = test_data.drop(['latitude', 'longitude'], axis=1)
+test_dataset = AISDataset(test_features)
 
-train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=32)
-test_loader = DataLoader(test_dataset, batch_size=1024, num_workers=32)
+train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=16)
+test_loader = DataLoader(test_dataset, batch_size=1024, num_workers=16)
 
 
 class Model(nn.Module):
     def __init__(self):
         super(Model, self).__init__()
-        self.layer = nn.Sequential(nn.Linear(features.shape[1], 64), nn.ReLU(), nn.Linear(64, 2))
+        self.layer = nn.Sequential(
+            nn.Linear(features.shape[1], 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2),
+        )
 
     def forward(self, x):
         return self.layer(x)
@@ -127,9 +149,15 @@ model = Model().to(device)
 criterion = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
+early_stopping_patience = 10
+best_loss = float('inf')
+patience_counter = 0
+
 logging.info('Training started')
 
 for epoch in range(100):
+    model.train()
+    epoch_loss = 0
     for i, (inputs, targets) in enumerate(train_loader):
         inputs = inputs.to(device).float()
         targets = targets.to(device).float()
@@ -140,7 +168,19 @@ for epoch in range(100):
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-    logging.info(f'Epoch {epoch+1} completed')
+
+        epoch_loss += loss.item()
+
+    logging.info(f'Epoch {epoch+1} completed with loss: {epoch_loss}')
+
+    if epoch_loss < best_loss:
+        best_loss = epoch_loss
+        patience_counter = 0
+    else:
+        patience_counter += 1
+        if patience_counter >= early_stopping_patience:
+            logging.info('Early stopping triggered')
+            break
 
 logging.info('Testing started')
 
@@ -156,7 +196,8 @@ with torch.no_grad():
 
 predictions = predictions.cpu().numpy()
 submission = pd.DataFrame(predictions, columns=['longitude_predicted', 'latitude_predicted'])
-submission.insert(0, 'ID', test_data['ID'])
+
+submission.insert(0, 'ID', test_ids.values)
 
 
 def get_unique_filename(base_filename):
