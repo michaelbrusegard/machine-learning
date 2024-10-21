@@ -20,7 +20,7 @@ train_data = pd.read_csv(os.path.join(current_dir, '../../cleaned_data/merged_m.
 logging.info('Loading test data...')
 test_data = pd.read_csv(os.path.join(current_dir, '../../original_data/ais/ais_test.csv'))
 
-logging.info('Converting datetime columns to datetime objects...')
+logging.info('Converting datetime columns to numbers...')
 date_columns_train = [
     'time',
     'etaRaw',
@@ -31,13 +31,31 @@ date_columns_train = [
 
 for column in date_columns_train:
     train_data[column] = pd.to_datetime(train_data[column], errors='coerce')
-for column in date_columns_train:
-    train_data[column] = train_data[column].apply(
-        lambda x: x.timestamp() if not pd.isnull(x) else x
-    )
+    train_data[column] = pd.to_numeric(train_data[column], errors='coerce')
+
 
 test_data['time'] = pd.to_datetime(test_data['time'])
-test_data['time'] = test_data['time'].apply(lambda x: x.timestamp() if not pd.isnull(x) else x)
+test_data['time'] = pd.to_numeric(test_data['time'], errors='coerce')
+
+logging.info('Converting id columns to codes...')
+id_columns = [
+    'ais_portId',
+    'vesselId',
+    'schedule_moored_portId',
+    'schedule_destination_portId',
+    'shippingLineId',
+    'homePort',
+]
+for column in id_columns:
+    train_data[column] = train_data[column].astype('category').cat.codes
+test_data['vesselId'] = test_data['vesselId'].astype('category').cat.codes
+
+logging.info('Data types of data:')
+print(train_data.dtypes)
+print(test_data.dtypes)
+
+logging.info('Sample of data:')
+print(train_data.sample(5))
 
 logging.info('Dropping latitude and longitude for predictions...')
 features = train_data.drop(['latitude', 'longitude'], axis=1)
@@ -45,33 +63,21 @@ labels = train_data[['latitude', 'longitude']]
 
 logging.info('Scale appropriate columns...')
 exclude_columns = [
-    'time',
-    'etaRaw',
-    'schedule_arrivalDate',
-    'schedule_sailingDate',
-    'schedule_voyage_end',
     'navstat_emergency',
     'navstat_reserved',
     'navstat_special_maneuver',
     'navstat_stopped',
     'navstat_undefined',
     'navstat_under_way',
-    'ais_portId',
-    'vesselId',
-    'schedule_moored_portId',
-    'schedule_destination_portId',
-    'shippingLineId',
-    'homePort',
     'schedule_small_movement_flag',
     'schedule_skipped_port_flag',
 ]
 
+for column in exclude_columns:
+    features[column] = pd.to_numeric(features[column], errors='coerce')
+
 scale_columns = [col for col in features.columns if col not in exclude_columns]
 features_scale = features[scale_columns]
-
-non_numeric_columns = features_scale.select_dtypes(exclude=['int64', 'float64']).columns
-
-print(non_numeric_columns)
 
 scaler = StandardScaler()
 features_scale = scaler.fit_transform(features_scale)
@@ -102,8 +108,8 @@ labels = labels.reset_index(drop=True)
 train_dataset = AISDataset(features, labels)
 test_dataset = AISDataset(test_data)
 
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-test_loader = DataLoader(test_dataset, batch_size=32)
+train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=32)
+test_loader = DataLoader(test_dataset, batch_size=1024, num_workers=32)
 
 
 class Model(nn.Module):
