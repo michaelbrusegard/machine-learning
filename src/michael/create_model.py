@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 import time
 import os
 
@@ -101,19 +101,20 @@ features[scale_columns] = features_scale
 
 
 class AISDataset(Dataset):
-    def __init__(self, features, labels=None):
+    def __init__(self, features, labels=None, sequence_length=5):
         self.features = features
         self.labels = labels
+        self.sequence_length = sequence_length
 
     def __len__(self):
-        return len(self.features)
+        return len(self.features) - self.sequence_length + 1
 
     def __getitem__(self, idx):
+        feature_seq = self.features.iloc[idx : idx + self.sequence_length].values.astype(float)
         if self.labels is not None:
-            return self.features.iloc[idx].values.astype(float), self.labels.iloc[
-                idx
-            ].values.astype(float)
-        return self.features.iloc[idx].values.astype(float)
+            label_seq = self.labels.iloc[idx + self.sequence_length - 1].values.astype(float)
+            return feature_seq, label_seq
+        return feature_seq
 
 
 logging.info('Creating datasets...')
@@ -124,38 +125,44 @@ train_dataset = AISDataset(features, labels)
 test_features = test_data.drop(['latitude', 'longitude'], axis=1)
 test_dataset = AISDataset(test_features)
 
+train_size = int(0.8 * len(train_dataset))
+val_size = len(train_dataset) - train_size
+train_dataset, val_dataset = random_split(train_dataset, [train_size, val_size])
+
 train_loader = DataLoader(train_dataset, batch_size=1024, shuffle=True, num_workers=16)
+val_loader = DataLoader(val_dataset, batch_size=1024, num_workers=16)
 test_loader = DataLoader(test_dataset, batch_size=1024, num_workers=16)
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self, input_size, hidden_size, output_size, num_layers=2, dropout=0.2):
         super(Model, self).__init__()
-        self.layer = nn.Sequential(
-            nn.Linear(features.shape[1], 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 2),
-        )
+        self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=dropout)
+        self.fc = nn.Linear(hidden_size, output_size)
 
     def forward(self, x):
-        return self.layer(x)
+        h_0 = torch.zeros(2, x.size(0), 128).to(device)
+        c_0 = torch.zeros(2, x.size(0), 128).to(device)
+        out, _ = self.lstm(x, (h_0, c_0))
+        out = self.fc(out[:, -1, :])
+        return out
 
 
 logging.info('Creating model...')
-model = Model().to(device)
+model = Model(features.shape[1], 128, 2).to(device)
 
 criterion = nn.MSELoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=3, factor=0.5)
 
 early_stopping_patience = 10
-best_loss = float('inf')
+best_val_loss = float('inf')
 patience_counter = 0
 
 logging.info('Training started')
 
-for epoch in range(100):
+epoch = 0
+while True:
     model.train()
     epoch_loss = 0
     for i, (inputs, targets) in enumerate(train_loader):
@@ -171,16 +178,35 @@ for epoch in range(100):
 
         epoch_loss += loss.item()
 
-    logging.info(f'Epoch {epoch+1} completed with loss: {epoch_loss}')
+    logging.info(f'Epoch {epoch+1} completed with training loss: {epoch_loss}')
 
-    if epoch_loss < best_loss:
-        best_loss = epoch_loss
+    model.eval()
+    val_loss = 0
+    with torch.no_grad():
+        for inputs, targets in val_loader:
+            inputs = inputs.to(device).float()
+            targets = targets.to(device).float()
+
+            outputs = model(inputs)
+            loss = criterion(outputs, targets)
+            val_loss += loss.item()
+
+    logging.info(f'Epoch {epoch+1} completed with validation loss: {val_loss}')
+    scheduler.step(val_loss)
+
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
         patience_counter = 0
+        torch.save(model.state_dict(), os.path.join(current_dir, './best_model.pth'))
     else:
         patience_counter += 1
         if patience_counter >= early_stopping_patience:
             logging.info('Early stopping triggered')
             break
+
+    epoch += 1
+
+model.load_state_dict(torch.load(os.path.join(current_dir, './best_model.pth')))
 
 logging.info('Testing started')
 
@@ -195,8 +221,16 @@ with torch.no_grad():
             predictions = torch.cat((predictions, outputs), 0)
 
 predictions = predictions.cpu().numpy()
-submission = pd.DataFrame(predictions, columns=['longitude_predicted', 'latitude_predicted'])
 
+if len(predictions) != len(test_ids):
+    logging.warning(
+        f'Length mismatch: predictions ({len(predictions)}) vs test_ids ({len(test_ids)})'
+    )
+    min_length = min(len(predictions), len(test_ids))
+    predictions = predictions[:min_length]
+    test_ids = test_ids[:min_length]
+
+submission = pd.DataFrame(predictions, columns=['longitude_predicted', 'latitude_predicted'])
 submission.insert(0, 'ID', test_ids.values)
 
 
