@@ -45,7 +45,7 @@ import os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Define the path to your file in the bucket
-file_path = os.path.join(current_dir, '../../original_data/ais_train.csv'),
+file_path = os.path.join(current_dir, '../../original_data/ais_train.csv')
 
 # Load the file into a pandas dataframe
 ais_train_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
@@ -57,7 +57,7 @@ ais_test_df = pd.read_csv(os.path.join(current_dir, '../../original_data/ais_tes
 ais_test_df.info()
 
 # Define the path to your file in the bucket
-file_path = os.path.join(current_dir, '../../original_data/ports.csv'),
+file_path = os.path.join(current_dir, '../../original_data/ports.csv')
 
 #Load the file into a pandas dataframe
 ports_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
@@ -65,7 +65,7 @@ ports_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
 ports_df.info()
 
 # Define the path to your file in the bucket
-file_path = os.path.join(current_dir, '../../original_data/vessels.csv'),
+file_path = os.path.join(current_dir, '../../original_data/vessels.csv')
 
 #Load the file into a pandas dataframe
 vessels_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
@@ -73,7 +73,7 @@ vessels_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
 vessels_df.info()
 
 # Define the path to your file in the bucket
-file_path = os.path.join(current_dir, '../../original_data/schedules_to_may_2024.csv'),
+file_path = os.path.join(current_dir, '../../original_data/schedules_to_may_2024.csv')
 
 #Load the file into a pandas dataframe
 schedules_df = pd.read_csv(file_path, delimiter= '|', encoding= 'utf-8')
